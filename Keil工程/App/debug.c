@@ -27,7 +27,7 @@ void Debug_Update(void)
 
     raw_adc = BSP_AdcReadBattery();
     adc_mv = (uint32_t)raw_adc * 3300UL / 4095UL;
-    bat_mv = adc_mv * 1000UL / 180UL;
+    bat_mv = adc_mv * VBAT_ADC_MULT;
 
     BSP_UartSendString("t=");
     BSP_UartSendInt((int32_t)(now * 5));
@@ -41,6 +41,8 @@ void Debug_Update(void)
     BSP_UartSendInt((int32_t)Control_GetDistance());
     BSP_UartSendString(" yaw=");
     BSP_UartSendInt((int32_t)Imu_GetYaw());
+    BSP_UartSendString(" gz=");
+    BSP_UartSendInt((int32_t)(Imu_GetGyroZ() * 10.0f));   /* 0.1 dps */
     BSP_UartSendString(" g=");
     BSP_UartSendInt(Control_GetGray());
     BSP_UartSendString(" L=");

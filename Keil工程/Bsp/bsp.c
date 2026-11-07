@@ -34,7 +34,9 @@ void BSP_LedOnboard(uint8_t on)
 
 void BSP_Buzzer(uint8_t on)
 {
-    GPIO_WriteBit(BUZZER_PORT, BUZZER_PIN, on ? Bit_SET : Bit_RESET);
+    /* The buzzer board used on the car is low-level triggered:
+     * PB0 = 0 -> sounds, PB0 = 1 -> silent. */
+    GPIO_WriteBit(BUZZER_PORT, BUZZER_PIN, on ? Bit_RESET : Bit_SET);
 }
 
 /* ------------------------------------------------------------------ */
@@ -195,11 +197,22 @@ void BSP_EncoderReset(void)
 /* ------------------------------------------------------------------ */
 uint16_t BSP_AdcReadBattery(void)
 {
-    ADC_SoftwareStartConvCmd(ADC1, ENABLE);
-    while (ADC_GetFlagStatus(ADC1, ADC_FLAG_EOC) == RESET)
+    uint32_t sum = 0;
+    uint8_t i;
+
+    /* Average 8 conversions (~45 us, about one 20 kHz PWM period) so the
+     * motor current ripple / ground bounce does not show up as a jumping
+     * battery voltage on the OLED. */
+    for (i = 0; i < 8; i++)
     {
+        ADC_SoftwareStartConvCmd(ADC1, ENABLE);
+        while (ADC_GetFlagStatus(ADC1, ADC_FLAG_EOC) == RESET)
+        {
+        }
+        sum += ADC_GetConversionValue(ADC1);
     }
-    return ADC_GetConversionValue(ADC1);
+
+    return (uint16_t)(sum / 8);
 }
 
 /* ------------------------------------------------------------------ */

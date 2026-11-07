@@ -90,6 +90,10 @@
 #define WHEEL_DIAMETER_MM       65.0f
 #define WHEEL_CIRCUMFERENCE_MM  (3.14159265f * WHEEL_DIAMETER_MM)
 #define COUNTS_PER_MM           (ENCODER_COUNTS_PER_REV / WHEEL_CIRCUMFERENCE_MM)
+/* Bench test 2026-11-07 (D153B, motors plugged left -> Motor A, right -> Motor B):
+ * with MOTOR_*_INVERT = 0 the car now drives forward, so do NOT invert the
+ * motors. Serial showed L = -1421 while driving forward with LEFT_SIGN = -1,
+ * i.e. both encoder channels count positive for forward motion. */
 #define ENCODER_LEFT_SIGN       (+1)
 #define ENCODER_RIGHT_SIGN      (+1)
 #define MOTOR_LEFT_INVERT       0
@@ -142,9 +146,19 @@
 #define GRAY_REVERSE            0
 
 /* ---------------- battery ---------------- */
-/* 3S Li-ion 9.0-12.6 V, divider 100k / 22k -> 0.180 ratio.
+/* WHEELTEC E326S 3S Li-ion pack, 9.0-12.6 V (12.6 V fully charged).
+ * The D153B driver board carries the divider on board (10k / 1k -> 1/11)
+ * and exposes it on the Output_IO "ADC" pin, so PB1 sees Vbat / 11.
+ * If an external 100k / 22k divider (0.180) is used instead, set
+ * VBAT_ADC_MULT to 1000/180 = 5 (or restore the old /180 formula).
  * ADC 3.3 V reference, 12 bit. */
-#define VBAT_DIVIDER_RATIO      0.180f
+/* Bench check 2026-11-07: pack measured 12.5 V with a multimeter while the
+ * OLED showed 13.7 V at MULT = 11, i.e. the whole chain has ~+10 % gain.
+ * Either the D153B divider is closer to 1/10 than 1/11, or VDDA is ~3.0 V
+ * instead of the assumed 3.3 V. MULT = 10 compensates both (constant gain);
+ * re-check with a multimeter before trusting the low-battery thresholds. */
+#define VBAT_DIVIDER_RATIO      (1.0f / 11.0f)
+#define VBAT_ADC_MULT           10UL
 #define VBAT_LOW_MV             10200   /* 3.40 V / cell */
 #define VBAT_CRITICAL_MV        9600    /* 3.20 V / cell */
 

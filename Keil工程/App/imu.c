@@ -5,6 +5,7 @@
 #include "MPU6050.h"
 #include "MPU6050_Reg.h"
 #include "Delay.h"
+#include "bsp.h"
 
 #define MPU6050_ADDR_W      0xD0
 #define MPU6050_ADDR_R      0xD1
@@ -54,6 +55,13 @@ void Imu_Init(void)
     MPU6050_WriteReg(MPU6050_ACCEL_CONFIG, 0x00);
 
     Delay_ms(50);
+
+    /* Debug aid: WHO_AM_I must read 0x68 (104). A floating AD0, swapped
+     * SDA/SCL or a missing module shows up as 0 or 255 here, which would
+     * also make the yaw stay at exactly 0 forever. */
+    BSP_UartSendString("\r\nMPU6050 WHO_AM_I=");
+    BSP_UartSendInt((int32_t)MPU6050_GetID());
+    BSP_UartSendString(" (expect 104)\r\n");
 }
 
 void Imu_Calibrate(void)
@@ -70,6 +78,12 @@ void Imu_Calibrate(void)
     g_gyro_bias_raw = (float)sum / 400.0f;
     g_gyro_z_dps = 0.0f;
     g_yaw_deg = 0.0f;
+
+    /* Debug aid: a healthy MPU6050 gives a small bias (tens to a few
+     * hundred counts). 0, -1 or 32767 means the reads are not real. */
+    BSP_UartSendString("gyro bias=");
+    BSP_UartSendInt((int32_t)g_gyro_bias_raw);
+    BSP_UartSendString("\r\n");
 }
 
 void Imu_Update(float dt)

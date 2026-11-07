@@ -152,7 +152,7 @@ static void ui_show_numbers(void)
     int32_t yaw = (int32_t)Imu_GetYaw();
     uint16_t raw_adc = BSP_AdcReadBattery();
     uint32_t adc_mv = (uint32_t)raw_adc * 3300UL / 4095UL;
-    uint32_t bat_mv = adc_mv * 1000UL / 180UL;
+    uint32_t bat_mv = adc_mv * VBAT_ADC_MULT;
 
     if (left < 0)   { left = 0; }
     if (left > 9999) { left = 9999; }
