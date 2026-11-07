@@ -1,0 +1,12 @@
+# Keil MDK 编译输出
+Objects/
+Listings/
+*.uvguix.*
+*.dep
+*.bak
+JLinkLog.txt
+
+# 操作系统
+Thumbs.db
+desktop.ini
+.DS_Store
