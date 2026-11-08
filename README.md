@@ -5,7 +5,7 @@
 - 题目：A 自动行驶小车
 - 主控：STM32F103C8T6（Blue Pill）
 - 开发环境：Keil MDK 5.36 + STM32F1 DFP 2.4.1，StdPeriph V3.5
-- 当前版本：**release1.4**（2026-11-08，声光同步）
+- 当前版本：**release1.7**（2026-11-08，MPU6050 Yaw 读数修复）
 
 ## 先看这里
 
@@ -94,6 +94,19 @@ MCU-/
   根目录与 `Keil工程/` 各一份、内容相同
 - 烧录步骤与上电自检见 [`烧录说明.txt`](烧录说明.txt)
 
+## release1.7 变更（2026-11-08，MPU6050 Yaw 修复 + 电压校准）
+
+相对 release1.4：
+
+- MPU6050 上电初始化加固：上电先等 100 ms，`WHO_AM_I` 应答后最多重试 5 次，
+  写完配置回读 `PWR_MGMT_1` 确认退出 sleep，失败时串口打印 `FAIL`
+- 修正软件 I2C 读时序：地址 ACK 检查、首字节 ACK、末字节 NACK
+- 陀螺仪校准增加量程检测：读数完全不变（stuck bus / 芯片仍在睡眠）判为坏，
+  `Imu_IsReady()` 置 0
+- OLED 的 `Y:` 在 IMU 未就绪时显示 `Err`，正常时显示 Yaw 数值
+- 电池校准 `VBAT_ADC_MULT` 由 10 改为 8（万用表 12.4 V 时 OLED 约 15.55 V）
+- `Project.hex` 47,563 B，MD5 `84E272F6D0BA0FFA6311212AB6B206A4`
+
 ## 版本
 
 | 版本 | 日期 | 说明 |
@@ -102,3 +115,4 @@ MCU-/
 | release1.1 | 2026-11-07 | 修复 Keil 下载问题：关闭 Debug Description（.dbgconf），实机烧录成功 |
 | release1.2 | 2026-11-07 | 调参前备份：电池采样、蜂鸣器、调试串口更新，准备跑图调 PID |
 | release1.4 | 2026-11-08 | 声光同步：`ui_indicator()` 统一驱动蜂鸣器/PB2/PC13，过点声光同步 |
+| release1.7 | 2026-11-08 | MPU6050 上电初始化修复，OLED 可读 Yaw；`VBAT_ADC_MULT=8` |

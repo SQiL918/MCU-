@@ -14,6 +14,8 @@
 static float g_gyro_bias_raw = 0.0f;
 static float g_gyro_z_dps = 0.0f;
 static float g_yaw_deg = 0.0f;
+static uint8_t g_imu_id = 0;
+static uint8_t g_imu_ok = 0;
 
 static int16_t Imu_ReadGyroZRaw(void)
 {
@@ -22,17 +24,25 @@ static int16_t Imu_ReadGyroZRaw(void)
 
     MyI2C_Start();
     MyI2C_SendByte(MPU6050_ADDR_W);
-    MyI2C_ReceiveAck();
+    if (MyI2C_ReceiveAck() != 0)          /* no slave at 0x68 */
+    {
+        MyI2C_Stop();
+        return 0;
+    }
     MyI2C_SendByte(MPU6050_GYRO_ZOUT_H);
     MyI2C_ReceiveAck();
 
     MyI2C_Start();
     MyI2C_SendByte(MPU6050_ADDR_R);
-    MyI2C_ReceiveAck();
+    if (MyI2C_ReceiveAck() != 0)
+    {
+        MyI2C_Stop();
+        return 0;
+    }
     h = MyI2C_ReceiveByte();
-    MyI2C_SendAck(1);
+    MyI2C_SendAck(0);                     /* ACK: request the low byte */
     l = MyI2C_ReceiveByte();
-    MyI2C_SendAck(1);
+    MyI2C_SendAck(1);                     /* NACK: end of read */
     MyI2C_Stop();
 
     return (int16_t)(((uint16_t)h << 8) | (uint16_t)l);
@@ -40,38 +50,82 @@ static int16_t Imu_ReadGyroZRaw(void)
 
 void Imu_Init(void)
 {
+    uint8_t try;
+    uint8_t pwr = 0xFF;
+
     MyI2C_Init();
 
-    /* Wake up, clock from X gyro PLL */
-    MPU6050_WriteReg(MPU6050_PWR_MGMT_1, 0x01);
-    MPU6050_WriteReg(MPU6050_PWR_MGMT_2, 0x00);
+    /* MPU6050 needs time after VDD rises. On a cold power-up the module can
+     * still be booting while the MCU starts writing, the config writes are
+     * then lost, the chip stays in sleep and the gyro reads 0 forever while
+     * WHO_AM_I still answers 0x68. Wait first, then verify the write really
+     * landed and retry a few times. */
+    Delay_ms(100);
 
-    /* 1 kHz / (1 + 4) = 200 Hz sample rate, 42 Hz DLPF */
-    MPU6050_WriteReg(MPU6050_SMPLRT_DIV, 0x04);
-    MPU6050_WriteReg(MPU6050_CONFIG, 0x03);
+    g_imu_id = 0;
+    g_imu_ok = 0;
 
-    /* +-2000 dps gyro, +-2 g accel (accel not used) */
-    MPU6050_WriteReg(MPU6050_GYRO_CONFIG, 0x18);
-    MPU6050_WriteReg(MPU6050_ACCEL_CONFIG, 0x00);
+    for (try = 0; try < 5; try++)
+    {
+        g_imu_id = MPU6050_GetID();
+        if (g_imu_id == 0x00 || g_imu_id == 0xFF)
+        {
+            Delay_ms(100);            /* no answer yet, wait and retry */
+            continue;
+        }
 
-    Delay_ms(50);
+        /* Wake up, clock from X gyro PLL */
+        MPU6050_WriteReg(MPU6050_PWR_MGMT_1, 0x01);
+        MPU6050_WriteReg(MPU6050_PWR_MGMT_2, 0x00);
 
-    /* Debug aid: WHO_AM_I must read 0x68 (104). A floating AD0, swapped
-     * SDA/SCL or a missing module shows up as 0 or 255 here, which would
-     * also make the yaw stay at exactly 0 forever. */
+        /* 1 kHz / (1 + 4) = 200 Hz sample rate, 42 Hz DLPF */
+        MPU6050_WriteReg(MPU6050_SMPLRT_DIV, 0x04);
+        MPU6050_WriteReg(MPU6050_CONFIG, 0x03);
+
+        /* +-2000 dps gyro, +-2 g accel (accel not used) */
+        MPU6050_WriteReg(MPU6050_GYRO_CONFIG, 0x18);
+        MPU6050_WriteReg(MPU6050_ACCEL_CONFIG, 0x00);
+
+        Delay_ms(20);
+
+        pwr = MPU6050_ReadReg(MPU6050_PWR_MGMT_1);
+        if ((pwr & 0x40) == 0)        /* sleep bit cleared -> config took */
+        {
+            g_imu_ok = 1;
+            break;
+        }
+
+        Delay_ms(100);                /* still asleep, try the whole init again */
+    }
+
     BSP_UartSendString("\r\nMPU6050 WHO_AM_I=");
-    BSP_UartSendInt((int32_t)MPU6050_GetID());
-    BSP_UartSendString(" (expect 104)\r\n");
+    BSP_UartSendInt((int32_t)g_imu_id);
+    BSP_UartSendString(" PWR_MGMT_1=");
+    BSP_UartSendInt((int32_t)pwr);
+    BSP_UartSendString(g_imu_ok ? " (ok, expect ID 104)\r\n"
+                                : " (FAIL, expect ID 104)\r\n");
 }
 
 void Imu_Calibrate(void)
 {
     int32_t sum = 0;
+    int16_t raw;
+    int16_t raw_min = 32767;
+    int16_t raw_max = -32768;
     uint16_t i;
+
+    if (!g_imu_ok)
+    {
+        BSP_UartSendString("IMU not found, skip gyro calibration\r\n");
+        return;
+    }
 
     for (i = 0; i < 400; i++)
     {
-        sum += Imu_ReadGyroZRaw();
+        raw = Imu_ReadGyroZRaw();
+        sum += raw;
+        if (raw < raw_min) { raw_min = raw; }
+        if (raw > raw_max) { raw_max = raw; }
         Delay_ms(5);
     }
 
@@ -79,17 +133,32 @@ void Imu_Calibrate(void)
     g_gyro_z_dps = 0.0f;
     g_yaw_deg = 0.0f;
 
-    /* Debug aid: a healthy MPU6050 gives a small bias (tens to a few
-     * hundred counts). 0, -1 or 32767 means the reads are not real. */
+    /* A real sensor always shows a few counts of noise. A rock-steady stream
+     * means we are reading a stuck bus / a sleeping chip, not the gyro. */
+    if (raw_min == raw_max)
+    {
+        g_imu_ok = 0;
+    }
+
     BSP_UartSendString("gyro bias=");
     BSP_UartSendInt((int32_t)g_gyro_bias_raw);
-    BSP_UartSendString("\r\n");
+    BSP_UartSendString(" range=");
+    BSP_UartSendInt((int32_t)(raw_max - raw_min));
+    BSP_UartSendString(g_imu_ok ? " (ok)\r\n" : " (bad)\r\n");
 }
 
 void Imu_Update(float dt)
 {
-    int16_t raw = Imu_ReadGyroZRaw();
-    float dps = ((float)raw - g_gyro_bias_raw) / GYRO_LSB_PER_DPS * GYRO_Z_SIGN;
+    int16_t raw;
+    float dps;
+
+    if (!g_imu_ok)
+    {
+        return;
+    }
+
+    raw = Imu_ReadGyroZRaw();
+    dps = ((float)raw - g_gyro_bias_raw) / GYRO_LSB_PER_DPS * GYRO_Z_SIGN;
 
     /* light first-order filter, ~3 ms time constant at 200 Hz */
     g_gyro_z_dps = 0.70f * g_gyro_z_dps + 0.30f * dps;
@@ -109,6 +178,11 @@ float Imu_GetGyroZ(void)
 void Imu_SetYaw(float yaw)
 {
     g_yaw_deg = yaw;
+}
+
+uint8_t Imu_IsReady(void)
+{
+    return g_imu_ok;
 }
 
 void Imu_ResetYaw(void)

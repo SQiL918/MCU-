@@ -8,5 +8,6 @@ float Imu_GetYaw(void);
 float Imu_GetGyroZ(void);
 void Imu_SetYaw(float yaw);
 void Imu_ResetYaw(void);
+uint8_t Imu_IsReady(void);
 
 #endif

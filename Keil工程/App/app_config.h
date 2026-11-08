@@ -157,8 +157,12 @@
  * Either the D153B divider is closer to 1/10 than 1/11, or VDDA is ~3.0 V
  * instead of the assumed 3.3 V. MULT = 10 compensates both (constant gain);
  * re-check with a multimeter before trusting the low-battery thresholds. */
+/* Bench check 2026-11-08: pack measured 12.4 V with a multimeter while the
+ * OLED showed ~15.55 V at MULT = 10 (idle, motors off). Corrected gain is
+ * 10 * 12.4 / 15.55 = 7.97, so use 8. The effective divider is ~1/8, not
+ * the 1/11 assumed for the D153B "ADC" pin. */
 #define VBAT_DIVIDER_RATIO      (1.0f / 11.0f)
-#define VBAT_ADC_MULT           10UL
+#define VBAT_ADC_MULT           8UL
 #define VBAT_LOW_MV             10200   /* 3.40 V / cell */
 #define VBAT_CRITICAL_MV        9600    /* 3.20 V / cell */
 

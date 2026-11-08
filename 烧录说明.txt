@@ -1,29 +1,44 @@
-第16队 自动行驶小车 固件 2026-11-08（声光同步版）
+第16队 自动行驶小车 固件 2026-11-08（改后版 · VBAT_ADC_MULT = 8）
 
-一、这版改了什么
-1. 只改了 Keil工程/App/ui.c：蜂鸣器 PB0、外接 LED PB2、板载 LED PC13
-   由同一个 ui_indicator() 驱动，声音和灯光严格同步。
-2. 删除 PC13 的 2 Hz 心跳，空闲时灯全灭，不再自己闪。
-3. 其余代码为 GitHub release1.2（commit 5154800）。
+一、版本说明
+这是电池电压校准“改后”的固件，VBAT_ADC_MULT = 8。
+万用表实测电池 12.4 V，原 MULT = 10 时 OLED 显示约 15.5 V，
+按 10 x 12.4 / 15.55 = 7.97 取 8，静置应显示 12.3~12.5 V。
+除这一个参数外，其余代码与“改前版”完全一致：
+声光同步（release1.4）、IMU 上电唤醒修复、I2C ACK 修正、假数据检测、Y:Err。
 
 二、固件
 Project.hex（本包根目录一份，Keil工程/ 里一份，内容相同）
-46,475 B   MD5 D0CCB89DD44B5F72A2A894258111C6CA
+47,563 B   MD5 84E272F6D0BA0FFA6311212AB6B206A4
 
 三、烧录
 方法一（推荐）：Keil 打开 Keil工程/Project.uvprojx，Debug 选 ST-Link，
-直接 Download。工程里的 Project.hex 已是新版。
+直接 Download。
 方法二：ST-Link Utility / STM32CubeProgrammer 直接烧本包根目录的 Project.hex。
 注意：若提示 Cannot access Memory @ 0x00000000，到 Debug -> Settings
-重新选一次调试器即可，不要勾选 Debug Description。
+重新选一次调试器，不要勾选 Debug Description。
 
-四、上电自检
-1. 不按启动：蜂鸣器不响，PB2、PC13 都不亮，不再闪烁。
-2. 按启动：响 100 ms，两个灯同时亮 100 ms。
-3. 过点：响 50 ms、停 50 ms、再响 50 ms，灯同步闪两下。
-4. 停车：响 500 ms，灯同时亮 500 ms。
-5. 不符合时先确认烧的是 46,475 B 那份 hex。
+四、上电检查
+串口 115200：
+    MPU6050 WHO_AM_I=104 PWR_MGMT_1=1 (ok, expect ID 104)
+    gyro bias=xxx range=xxx (ok)
 
-五、提示节奏
-启动 100 ms，过点 50/50/50 ms，停车 500 ms，都在 ui.c 的
-g_pat_start / g_pat_point / g_pat_stop 数组里，单位为 5 ms。
+OLED 静置（电机不转）：
+    B 约 12.4 V     ← 本改后版的特征
+    Y 转动时应有变化；模块异常显示 Y:Err
+
+声光：
+    不按启动灯全灭；启动响 100 ms 灯同步亮；
+    过点响两下闪两下；停车响 500 ms 灯同步亮。
+
+五、和改前版的区别
+只有 App/app_config.h 一行不同：
+
+    本包      #define VBAT_ADC_MULT   8UL
+    改前包    #define VBAT_ADC_MULT   10UL
+
+六、注意
+1. mode 2 弧线结束时 yaw 会跳到 -180 或 +180，是 path.c 写死的值，
+   不是测量值，不能用它判断 IMU 是否正常。
+2. 跑起来时 B 会掉到 10~11 V，是电机带载压降和 PWM 干扰，静置值才作准。
+3. VBAT_LOW_MV / VBAT_CRITICAL_MV 目前代码里没有使用，只作记录。

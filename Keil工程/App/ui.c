@@ -170,7 +170,14 @@ static void ui_show_numbers(void)
     OLED_ShowNum(3, 3, (uint32_t)g_speed_set, 4);
     OLED_ShowNum(3, 11, (uint32_t)g_mode, 1);
 
-    OLED_ShowSignedNum(4, 3, yaw, 4);
+    if (Imu_IsReady())
+    {
+        OLED_ShowSignedNum(4, 3, yaw, 4);
+    }
+    else
+    {
+        OLED_ShowString(4, 3, "Err  ");
+    }
 
     OLED_ShowNum(4, 10, bat_mv / 1000UL, 2);
     OLED_ShowNum(4, 13, (bat_mv % 1000UL) / 100UL, 1);
