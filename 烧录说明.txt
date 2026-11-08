@@ -1,44 +1,49 @@
-第16队 自动行驶小车 固件 2026-11-08（改后版 · VBAT_ADC_MULT = 8）
+第16队 自动行驶小车 固件 2026-11-08（Q2 转向修复版）
 
-一、版本说明
-这是电池电压校准“改后”的固件，VBAT_ADC_MULT = 8。
-万用表实测电池 12.4 V，原 MULT = 10 时 OLED 显示约 15.5 V，
-按 10 x 12.4 / 15.55 = 7.97 取 8，静置应显示 12.3~12.5 V。
-除这一个参数外，其余代码与“改前版”完全一致：
-声光同步（release1.4）、IMU 上电唤醒修复、I2C ACK 修正、假数据检测、Y:Err。
+一、版本
+基于 GitHub release1.7（7c07139），只改了一行：
+Keil工程/App/path.c 的 g_path_q2 第二段弧
+    arc_dir: +1（左转） -> -1（右转）
+其余代码与 release1.7 完全一致（声光同步、IMU 修复、VBAT_ADC_MULT=8）。
 
-二、固件
+二、这版解决什么
+场地为顺时针（A 左上、B 右上、C 右下、D 左下），Q2 的 B→C 和 D→A
+两段半圆都应该是右转。旧版第二段写成左转，车到 D 点会往反方向拐。
+本版两段都是右转：
+    B→C  arc_dir = -1
+    D→A  arc_dir = -1
+
+三、固件
 Project.hex（本包根目录一份，Keil工程/ 里一份，内容相同）
-47,563 B   MD5 84E272F6D0BA0FFA6311212AB6B206A4
+47,563 B   MD5 1AF3BE2B38FBC1F25F7DDB2E3702D51B
 
-三、烧录
+四、烧录
 方法一（推荐）：Keil 打开 Keil工程/Project.uvprojx，Debug 选 ST-Link，
 直接 Download。
 方法二：ST-Link Utility / STM32CubeProgrammer 直接烧本包根目录的 Project.hex。
 注意：若提示 Cannot access Memory @ 0x00000000，到 Debug -> Settings
 重新选一次调试器，不要勾选 Debug Description。
 
-四、上电检查
+五、上电检查
 串口 115200：
     MPU6050 WHO_AM_I=104 PWR_MGMT_1=1 (ok, expect ID 104)
-    gyro bias=xxx range=xxx (ok)
+    gyro bias=xxx range=xxx (ok/bad)
+OLED 静置：
+    B 约 12.4 V（VBAT_ADC_MULT=8）
+    Y 正常时显示角度，IMU 坏时显示 Err
 
-OLED 静置（电机不转）：
-    B 约 12.4 V     ← 本改后版的特征
-    Y 转动时应有变化；模块异常显示 Y:Err
+六、Q2 预期动作
+A→B 直行 1000 mm
+B→C 右转半圆
+C→D 直行 1000 mm
+D→A 右转半圆，停车
+第一段弧结束 yaw 写 -180，第二段写 -360（等价 0，朝东）。
+这是代码按 180 度弧线写死的值，不是测量值，不能用它判断 IMU 是否正常。
 
-声光：
-    不按启动灯全灭；启动响 100 ms 灯同步亮；
-    过点响两下闪两下；停车响 500 ms 灯同步亮。
-
-五、和改前版的区别
-只有 App/app_config.h 一行不同：
-
-    本包      #define VBAT_ADC_MULT   8UL
-    改前包    #define VBAT_ADC_MULT   10UL
-
-六、注意
-1. mode 2 弧线结束时 yaw 会跳到 -180 或 +180，是 path.c 写死的值，
-   不是测量值，不能用它判断 IMU 是否正常。
-2. 跑起来时 B 会掉到 10~11 V，是电机带载压降和 PWM 干扰，静置值才作准。
-3. VBAT_LOW_MV / VBAT_CRITICAL_MV 目前代码里没有使用，只作记录。
+七、注意
+1. 本版只修了转向符号。灰度 g=255 没解决，Q2 仍然不会循迹，
+   弧线是开环前馈，必须把车放正、场地尺寸准确。
+2. Q3/Q4 的表没有改，仍然是 C→B 右转、D→A 左转。
+   按顺时针场地推，这两段应该反过来；先用低速单独核对，不要直接跑 Q4。
+3. IMU 仍可能是 Err；mode 1 的直行没有航向修正，但里程到点会停。
+4. 声光提示未改动：启动 100 ms，过点两声，停车 500 ms。

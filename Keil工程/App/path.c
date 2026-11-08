@@ -17,7 +17,7 @@ static const Segment g_path_q2[] =
     { SEG_STRAIGHT, TRACK_AB_MM,          1.00f,  0, 1 }, /* B */
     { SEG_ARC,      TRACK_ARC_MM,         0.75f, -1, 1 }, /* C, right arc */
     { SEG_STRAIGHT, TRACK_CD_MM,          1.00f,  0, 1 }, /* D */
-    { SEG_ARC,      TRACK_ARC_MM,         0.75f, +1, 1 }, /* A, left arc */
+    { SEG_ARC,      TRACK_ARC_MM,         0.75f, -1, 1 }, /* A, right arc (clockwise track) */
     { SEG_STOP,     0.0f,                 0.00f,  0, 0 }
 };
 

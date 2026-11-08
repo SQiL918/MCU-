@@ -5,7 +5,7 @@
 - 题目：A 自动行驶小车
 - 主控：STM32F103C8T6（Blue Pill）
 - 开发环境：Keil MDK 5.36 + STM32F1 DFP 2.4.1，StdPeriph V3.5
-- 当前版本：**release1.7**（2026-11-08，MPU6050 Yaw 读数修复）
+- 当前版本：**release1.9**（2026-11-08，Q2 转向修复）
 
 ## 先看这里
 
@@ -107,6 +107,16 @@ MCU-/
 - 电池校准 `VBAT_ADC_MULT` 由 10 改为 8（万用表 12.4 V 时 OLED 约 15.55 V）
 - `Project.hex` 47,563 B，MD5 `84E272F6D0BA0FFA6311212AB6B206A4`
 
+## release1.9 变更（2026-11-08，Q2 转向修复）
+
+相对 release1.7，只改 `Keil工程/App/path.c` 一行：
+
+- `g_path_q2` 第二段半圆（D→A）的 `arc_dir` 由 `+1`（左转）改为 `-1`（右转），
+  与 B→C 段一致；Q2 顺时针整圈 A→B→C→D→A 的转向正确
+- `Project.hex` 47,563 B，MD5 `1AF3BE2B38FBC1F25F7DDB2E3702D51B`
+- `烧录说明.txt` 同时记录当前限制：灰度 g=255 未解决、Q2 弧线为开环前馈、
+  Q3/Q4 段表未改，建议低速单独核对
+
 ## 版本
 
 | 版本 | 日期 | 说明 |
@@ -116,3 +126,4 @@ MCU-/
 | release1.2 | 2026-11-07 | 调参前备份：电池采样、蜂鸣器、调试串口更新，准备跑图调 PID |
 | release1.4 | 2026-11-08 | 声光同步：`ui_indicator()` 统一驱动蜂鸣器/PB2/PC13，过点声光同步 |
 | release1.7 | 2026-11-08 | MPU6050 上电初始化修复，OLED 可读 Yaw；`VBAT_ADC_MULT=8` |
+| release1.9 | 2026-11-08 | Q2 第二段半圆（D→A）改为右转，顺时针整圈方向正确 |
