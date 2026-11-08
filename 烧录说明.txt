@@ -1,0 +1,29 @@
+第16队 自动行驶小车 固件 2026-11-08（声光同步版）
+
+一、这版改了什么
+1. 只改了 Keil工程/App/ui.c：蜂鸣器 PB0、外接 LED PB2、板载 LED PC13
+   由同一个 ui_indicator() 驱动，声音和灯光严格同步。
+2. 删除 PC13 的 2 Hz 心跳，空闲时灯全灭，不再自己闪。
+3. 其余代码为 GitHub release1.2（commit 5154800）。
+
+二、固件
+Project.hex（本包根目录一份，Keil工程/ 里一份，内容相同）
+46,475 B   MD5 D0CCB89DD44B5F72A2A894258111C6CA
+
+三、烧录
+方法一（推荐）：Keil 打开 Keil工程/Project.uvprojx，Debug 选 ST-Link，
+直接 Download。工程里的 Project.hex 已是新版。
+方法二：ST-Link Utility / STM32CubeProgrammer 直接烧本包根目录的 Project.hex。
+注意：若提示 Cannot access Memory @ 0x00000000，到 Debug -> Settings
+重新选一次调试器即可，不要勾选 Debug Description。
+
+四、上电自检
+1. 不按启动：蜂鸣器不响，PB2、PC13 都不亮，不再闪烁。
+2. 按启动：响 100 ms，两个灯同时亮 100 ms。
+3. 过点：响 50 ms、停 50 ms、再响 50 ms，灯同步闪两下。
+4. 停车：响 500 ms，灯同时亮 500 ms。
+5. 不符合时先确认烧的是 46,475 B 那份 hex。
+
+五、提示节奏
+启动 100 ms，过点 50/50/50 ms，停车 500 ms，都在 ui.c 的
+g_pat_start / g_pat_point / g_pat_stop 数组里，单位为 5 ms。

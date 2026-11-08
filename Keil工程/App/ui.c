@@ -13,8 +13,6 @@ static uint8_t g_mode = 1;
 
 static uint32_t g_last_ui_ms = 0;
 static uint32_t g_last_key_ms = 0;
-static uint32_t g_last_blink_ms = 0;
-static uint8_t  g_blink_state = 0;
 
 static uint8_t g_db_start_state = 0;
 static uint8_t g_db_speed_state = 0;
@@ -51,6 +49,15 @@ static uint8_t key_debounce(uint8_t raw, uint8_t *state, uint8_t *count)
     return 0;
 }
 
+/* 声光提示必须同时出现：蜂鸣器、外接 LED（PB2）、板载 LED（PC13）由同一
+ * 函数驱动，保证 UI_Announce / UI_Tick5ms 里三者的电平永远一致。 */
+static void ui_indicator(uint8_t on)
+{
+    BSP_Buzzer(on);
+    BSP_Led(on);
+    BSP_LedOnboard(on);
+}
+
 void UI_Init(void)
 {
     OLED_Init();
@@ -66,8 +73,7 @@ void UI_Init(void)
     OLED_ShowString(3, 1, "V:     M:Q");
     OLED_ShowString(4, 1, "Y:     B:  . V");
 
-    BSP_Buzzer(0);
-    BSP_Led(0);
+    ui_indicator(0);
 }
 
 void UI_Announce(PathEvent event)
@@ -92,8 +98,7 @@ void UI_Announce(PathEvent event)
     g_pat_index = 0;
     g_pat_timer = g_pat[0];
 
-    BSP_Buzzer(1);
-    BSP_Led(1);
+    ui_indicator(1);
 }
 
 void UI_Tick5ms(void)
@@ -121,8 +126,7 @@ void UI_Tick5ms(void)
     if (d == 0)
     {
         g_pat = 0;
-        BSP_Buzzer(0);
-        BSP_Led(0);
+        ui_indicator(0);
         return;
     }
 
@@ -130,13 +134,11 @@ void UI_Tick5ms(void)
 
     if ((g_pat_index & 1u) == 0)
     {
-        BSP_Buzzer(1);
-        BSP_Led(1);
+        ui_indicator(1);
     }
     else
     {
-        BSP_Buzzer(0);
-        BSP_Led(0);
+        ui_indicator(0);
     }
 }
 
@@ -225,13 +227,5 @@ void UI_Update(void)
     {
         g_last_ui_ms = now;
         ui_show_numbers();
-    }
-
-    /* heartbeat on the onboard LED, 2 Hz */
-    if ((now - g_last_blink_ms) >= 100)
-    {
-        g_last_blink_ms = now;
-        g_blink_state = (uint8_t)!g_blink_state;
-        BSP_LedOnboard(g_blink_state);
     }
 }
