@@ -10,3 +10,6 @@ JLinkLog.txt
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# 主机仿真编译产物
+*.exe

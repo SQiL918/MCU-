@@ -1,9 +1,33 @@
 #include "bsp.h"
 #include "Delay.h"
 
+/* ------------------------------------------------------------------ */
+/* robustness: no blocking wait may spin forever                       */
+/* ------------------------------------------------------------------ */
+/* Both loops below normally finish in microseconds.  The guard is about
+ * 10x a full 115200 baud byte time / an ADC conversion, so hitting it means
+ * the peripheral is really wedged (brown-out, clock issue, ...).  The
+ * caller then keeps running instead of freezing the whole main loop. */
+#define BSP_TXE_GUARD           20000u
+#define BSP_EOC_GUARD           20000u
+
+/* IWDG by direct register access: stm32f10x_iwdg.c is not part of this
+ * project (same trick as the DWT access in System/Delay.c). */
+#define IWDG_BASE_ADDR          0x40003000UL
+#define IWDG_KR                 (*(volatile uint16_t *)(IWDG_BASE_ADDR + 0x00UL))
+#define IWDG_PR                 (*(volatile uint16_t *)(IWDG_BASE_ADDR + 0x04UL))
+#define IWDG_RLR                (*(volatile uint16_t *)(IWDG_BASE_ADDR + 0x08UL))
+#define IWDG_SR                 (*(volatile uint16_t *)(IWDG_BASE_ADDR + 0x0CUL))
+
+/* DBGMCU_CR: let the debugger freeze the IWDG while the core is halted,
+ * otherwise a breakpoint longer than the timeout would reset the target. */
+#define DBGMCU_CR_ADDR          0xE0042004UL
+
 static volatile uint32_t g_tick_5ms = 0;
 static uint16_t g_enc_last_left = 0;
 static uint16_t g_enc_last_right = 0;
+static volatile uint8_t g_stage = 0;
+static uint8_t  g_reset_cause = 0;
 
 /* ------------------------------------------------------------------ */
 /* low level helpers                                                   */
@@ -60,38 +84,18 @@ uint8_t BSP_KeyMode(void)
 /* ------------------------------------------------------------------ */
 /* grayscale                                                           */
 /* ------------------------------------------------------------------ */
-uint8_t BSP_GrayRead(void)
+/* The 8-channel module is read over USART1 now (see Bsp/gray_uart.c).
+ * The parallel OUT ribbon is no longer used: the 8 pins below are parked as
+ * inputs with a pull-down so nothing floats.  Unplug OUT-1..OUT-8 from the
+ * car - the module drives those wires at up to ~4 V, which is above the
+ * 3.3 V rail for the non-FT pins.
+ * (PA8, PA11, PA12, PA15, PB3, PB4, PB5, PB14 were the old OUT pins.) */
+static void BSP_GrayPinsIdle(void)
 {
-    uint8_t bits = 0;
-
-    if (GPIO_ReadInputDataBit(GPIOB, GPIO_Pin_3))  { bits |= 0x01; } /* OUT1 */
-    if (GPIO_ReadInputDataBit(GPIOB, GPIO_Pin_4))  { bits |= 0x02; } /* OUT2 */
-    if (GPIO_ReadInputDataBit(GPIOB, GPIO_Pin_5))  { bits |= 0x04; } /* OUT3 */
-    if (GPIO_ReadInputDataBit(GPIOA, GPIO_Pin_8))  { bits |= 0x08; } /* OUT4 */
-    if (GPIO_ReadInputDataBit(GPIOA, GPIO_Pin_11)) { bits |= 0x10; } /* OUT5 */
-    if (GPIO_ReadInputDataBit(GPIOA, GPIO_Pin_12)) { bits |= 0x20; } /* OUT6 */
-    if (GPIO_ReadInputDataBit(GPIOA, GPIO_Pin_15)) { bits |= 0x40; } /* OUT7 */
-    if (GPIO_ReadInputDataBit(GPIOB, GPIO_Pin_14)) { bits |= 0x80; } /* OUT8 */
-
-#if GRAY_BLACK_IS_HIGH
-    /* already active high on black */
-#else
-    bits = (uint8_t)~bits;
-#endif
-
-#if GRAY_REVERSE
-    {
-        uint8_t r = 0;
-        uint8_t i;
-        for (i = 0; i < 8; i++)
-        {
-            if (bits & (1 << i)) { r |= (uint8_t)(1 << (7 - i)); }
-        }
-        bits = r;
-    }
-#endif
-
-    return bits;
+    GPIO_Config(GPIOA, GPIO_Pin_8 | GPIO_Pin_11 | GPIO_Pin_12 | GPIO_Pin_15,
+                GPIO_Mode_IPD);
+    GPIO_Config(GPIOB, GPIO_Pin_3 | GPIO_Pin_4 | GPIO_Pin_5 | GPIO_Pin_14,
+                GPIO_Mode_IPD);
 }
 
 /* ------------------------------------------------------------------ */
@@ -197,6 +201,7 @@ void BSP_EncoderReset(void)
 /* ------------------------------------------------------------------ */
 uint16_t BSP_AdcReadBattery(void)
 {
+    static uint16_t last = 0;
     uint32_t sum = 0;
     uint8_t i;
 
@@ -205,14 +210,23 @@ uint16_t BSP_AdcReadBattery(void)
      * battery voltage on the OLED. */
     for (i = 0; i < 8; i++)
     {
+        uint32_t guard = BSP_EOC_GUARD;
+
         ADC_SoftwareStartConvCmd(ADC1, ENABLE);
         while (ADC_GetFlagStatus(ADC1, ADC_FLAG_EOC) == RESET)
         {
+            /* A brown-out can leave the ADC without a running conversion.
+             * Never spin forever: give up and keep the last good value. */
+            if (--guard == 0u)
+            {
+                return last;
+            }
         }
         sum += ADC_GetConversionValue(ADC1);
     }
 
-    return (uint16_t)(sum / 8);
+    last = (uint16_t)(sum / 8);
+    return last;
 }
 
 /* ------------------------------------------------------------------ */
@@ -220,8 +234,24 @@ uint16_t BSP_AdcReadBattery(void)
 /* ------------------------------------------------------------------ */
 void BSP_UartSendChar(char c)
 {
+    static uint8_t tx_stuck = 0;
+    uint32_t guard = BSP_TXE_GUARD;
+
+    /* If TXE never comes back (USART/peripheral in a bad state) drop the
+     * byte instead of freezing the main loop.  Latch it so the log stops
+     * cleanly instead of costing milliseconds per character. */
+    if (tx_stuck)
+    {
+        return;
+    }
+
     while (USART_GetFlagStatus(USART1, USART_FLAG_TXE) == RESET)
     {
+        if (--guard == 0u)
+        {
+            tx_stuck = 1;
+            return;
+        }
     }
     USART_SendData(USART1, (uint16_t)(uint8_t)c);
 }
@@ -277,6 +307,73 @@ uint32_t BSP_GetTick5ms(void)
     return g_tick_5ms;
 }
 
+/* ------------------------------------------------------------------ */
+/* watchdog + crash diagnostics                                        */
+/* ------------------------------------------------------------------ */
+void BSP_WdgInit(uint16_t timeout_ms)
+{
+    uint32_t reload;
+
+    if (timeout_ms == 0u) { return; }     /* watchdog disabled */
+
+    if (timeout_ms < 50u)    { timeout_ms = 50u; }
+    if (timeout_ms > 26000u) { timeout_ms = 26000u; }
+
+    /* LSI ~40 kHz, /64 = 625 Hz -> 1.6 ms per count. */
+    reload = (uint32_t)timeout_ms * 625u / 1000u;
+    if (reload < 10u)    { reload = 10u; }
+    if (reload > 0x0FFFu) { reload = 0x0FFFu; }
+
+    *(volatile uint32_t *)DBGMCU_CR_ADDR |= (1u << 8);   /* DBG_IWDG_STOP */
+
+    IWDG_KR = 0x5555u;                  /* unlock PR / RLR */
+    IWDG_PR = 4u;                       /* prescaler /64 */
+    IWDG_RLR = (uint16_t)reload;
+    {
+        uint32_t guard = 200000u;       /* wait for PR/RLR update, bounded */
+        while (((IWDG_SR & 0x03u) != 0u) && (--guard != 0u))
+        {
+        }
+    }
+    IWDG_KR = 0xAAAAu;                  /* load the counter */
+    IWDG_KR = 0xCCCCu;                  /* start */
+}
+
+void BSP_WdgFeed(void)
+{
+    IWDG_KR = 0xAAAAu;
+}
+
+uint8_t BSP_ResetCause(void)
+{
+    return g_reset_cause;
+}
+
+void BSP_Stage(uint8_t stage)
+{
+    g_stage = stage;
+}
+
+uint8_t BSP_GetStage(void)
+{
+    return g_stage;
+}
+
+static void BSP_ResetCauseSample(void)
+{
+    uint8_t c = 0;
+
+    if (RCC_GetFlagStatus(RCC_FLAG_PORRST)  != RESET) { c |= 0x01u; }
+    if (RCC_GetFlagStatus(RCC_FLAG_PINRST)  != RESET) { c |= 0x02u; }
+    if (RCC_GetFlagStatus(RCC_FLAG_SFTRST)  != RESET) { c |= 0x04u; }
+    if (RCC_GetFlagStatus(RCC_FLAG_IWDGRST) != RESET) { c |= 0x08u; }
+    if (RCC_GetFlagStatus(RCC_FLAG_WWDGRST) != RESET) { c |= 0x10u; }
+    if (RCC_GetFlagStatus(RCC_FLAG_LPWRRST) != RESET) { c |= 0x20u; }
+
+    g_reset_cause = c;
+    RCC_ClearFlag();
+}
+
 static void BSP_LedInit(void)
 {
     GPIO_Config(LED_PORT, LED_PIN, GPIO_Mode_Out_PP);
@@ -296,15 +393,6 @@ static void BSP_KeyInit(void)
     GPIO_Config(KEY_START_PORT, KEY_START_PIN, GPIO_Mode_IPU);
     GPIO_Config(KEY_SPEED_PORT, KEY_SPEED_PIN, GPIO_Mode_IPU);
     GPIO_Config(KEY_MODE_PORT,  KEY_MODE_PIN,  GPIO_Mode_IPU);
-}
-
-static void BSP_GrayInit(void)
-{
-    /* PB3/PB4/PA15 are JTAG pins; JTAG is disabled in BSP_Init(). */
-    GPIO_Config(GPIOB, GPIO_Pin_3 | GPIO_Pin_4 | GPIO_Pin_5 | GPIO_Pin_14,
-                GPIO_Mode_IPU);
-    GPIO_Config(GPIOA, GPIO_Pin_8 | GPIO_Pin_11 | GPIO_Pin_12 | GPIO_Pin_15,
-                GPIO_Mode_IPU);
 }
 
 static void BSP_MotorInit(void)
@@ -439,7 +527,7 @@ static void BSP_UartInit(void)
     gpio.GPIO_Mode = GPIO_Mode_IPU;
     GPIO_Init(GPIOA, &gpio);
 
-    uart.USART_BaudRate = 115200;
+    uart.USART_BaudRate = GRAY_UART_BAUD;   /* debug log + grayscale module */
     uart.USART_WordLength = USART_WordLength_8b;
     uart.USART_StopBits = USART_StopBits_1;
     uart.USART_Parity = USART_Parity_No;
@@ -465,7 +553,13 @@ static void BSP_TickInit(void)
     TIM_ITConfig(TIM1, TIM_IT_Update, ENABLE);
 
     nvic.NVIC_IRQChannel = TIM1_UP_IRQn;
-    nvic.NVIC_IRQChannelPreemptionPriority = 0;
+    /* 1, not 0: the USART1 RX interrupt must be able to preempt this 5 ms
+     * handler.  The MPU6050 read below runs a bit-banged I2C here and takes
+     * ~1.5 ms; with USART1 below TIM1 a 17 byte grayscale frame arriving in
+     * that window was lost by hardware overrun.  USART1's handler is a few
+     * microseconds and only moves one byte into a ring buffer, so the jitter
+     * it adds to the control tick is negligible. */
+    nvic.NVIC_IRQChannelPreemptionPriority = 1;
     nvic.NVIC_IRQChannelSubPriority = 0;
     nvic.NVIC_IRQChannelCmd = ENABLE;
     NVIC_Init(&nvic);
@@ -479,6 +573,9 @@ void BSP_TickStart(void)
 
 void BSP_Init(void)
 {
+    BSP_Stage(BSP_STAGE_BOOT);
+    BSP_ResetCauseSample();          /* must run before anything clears RCC flags */
+
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA | RCC_APB2Periph_GPIOB |
                            RCC_APB2Periph_GPIOC | RCC_APB2Periph_AFIO |
                            RCC_APB2Periph_ADC1 | RCC_APB2Periph_USART1 |
@@ -496,7 +593,7 @@ void BSP_Init(void)
     BSP_LedInit();
     BSP_BuzzerInit();
     BSP_KeyInit();
-    BSP_GrayInit();
+    BSP_GrayPinsIdle();
     BSP_MotorInit();
     BSP_EncoderInit();
     BSP_AdcInit();

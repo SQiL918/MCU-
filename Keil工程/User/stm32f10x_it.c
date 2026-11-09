@@ -23,6 +23,53 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "stm32f10x_it.h"
+#include "bsp.h"
+
+/* =========================================================================
+ * Crash reporting.
+ *
+ * The old handlers were a bare `while (1)`, which looks exactly like "the
+ * program hangs" and tells nobody why.  Now a fault prints the stage marker
+ * (see BSP_Stage), the fault status registers and then blinks the onboard
+ * LED; if the watchdog is already running, the chip resets itself ~2 s
+ * later and the next boot reports "IWDG" in the reset flags, so a hang can
+ * be told apart from a power/ wiring problem.
+ * ========================================================================= */
+static void Fault_Report(const char *name)
+{
+    BSP_UartSendString("\r\nFAULT ");
+    BSP_UartSendString(name);
+    BSP_UartSendString(" stage=");
+    BSP_UartSendInt((int32_t)BSP_GetStage());
+    BSP_UartSendString(" CFSR=");
+    BSP_UartSendInt((int32_t)(SCB->CFSR & 0x7FFFFFFFu));
+    BSP_UartSendString(" HFSR=");
+    BSP_UartSendInt((int32_t)(SCB->HFSR & 0x7FFFFFFFu));
+    BSP_UartSendString(" MMFAR=");
+    BSP_UartSendInt((int32_t)(SCB->MMFAR & 0x7FFFFFFFu));
+    BSP_UartSendString(" BFAR=");
+    BSP_UartSendInt((int32_t)(SCB->BFAR & 0x7FFFFFFFu));
+    BSP_UartSendString("\r\n");
+}
+
+static void Fault_Hold(uint8_t blinks)
+{
+    volatile uint32_t d;
+
+    for (;;)
+    {
+        uint8_t i;
+
+        for (i = 0; i < blinks; i++)
+        {
+            GPIO_WriteBit(GPIOC, GPIO_Pin_13, Bit_RESET);   /* LED on */
+            for (d = 0; d < 1500000u; d++) { }
+            GPIO_WriteBit(GPIOC, GPIO_Pin_13, Bit_SET);
+            for (d = 0; d < 1500000u; d++) { }
+        }
+        for (d = 0; d < 3000000u; d++) { }
+    }
+}
 
 /** @addtogroup STM32F10x_StdPeriph_Template
   * @{
@@ -55,10 +102,8 @@ void NMI_Handler(void)
   */
 void HardFault_Handler(void)
 {
-  /* Go to infinite loop when Hard Fault exception occurs */
-  while (1)
-  {
-  }
+  Fault_Report("HARD");
+  Fault_Hold(3);
 }
 
 /**
@@ -68,10 +113,8 @@ void HardFault_Handler(void)
   */
 void MemManage_Handler(void)
 {
-  /* Go to infinite loop when Memory Manage exception occurs */
-  while (1)
-  {
-  }
+  Fault_Report("MEM");
+  Fault_Hold(4);
 }
 
 /**
@@ -81,10 +124,8 @@ void MemManage_Handler(void)
   */
 void BusFault_Handler(void)
 {
-  /* Go to infinite loop when Bus Fault exception occurs */
-  while (1)
-  {
-  }
+  Fault_Report("BUS");
+  Fault_Hold(5);
 }
 
 /**
@@ -94,10 +135,8 @@ void BusFault_Handler(void)
   */
 void UsageFault_Handler(void)
 {
-  /* Go to infinite loop when Usage Fault exception occurs */
-  while (1)
-  {
-  }
+  Fault_Report("USAGE");
+  Fault_Hold(6);
 }
 
 /**

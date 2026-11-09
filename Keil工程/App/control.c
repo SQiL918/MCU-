@@ -1,10 +1,11 @@
-﻿#include "stm32f10x.h"
+#include "stm32f10x.h"
 #include "control.h"
 #include "app_config.h"
 #include "bsp.h"
 #include "imu.h"
 #include "path.h"
 #include "ui.h"
+#include "gray_uart.h"
 
 static float g_distance_mm = 0.0f;
 static float g_speed_left = 0.0f;
@@ -86,8 +87,13 @@ void Control_Step(void)
     PathInput in;
     PathOutput out;
 
+    BSP_Stage(BSP_STAGE_CONTROL);
     BSP_EncoderRead(&d_left, &d_right);
-    g_gray_bits = BSP_GrayRead();
+
+    /* Drain and decode the grayscale UART first, so the path state machine
+     * below always works on the newest 8-channel picture. */
+    Gray_Task();
+    g_gray_bits = Gray_GetBits();
 
     dist_delta = ((float)d_left + (float)d_right) * 0.5f / COUNTS_PER_MM;
     g_distance_mm += dist_delta;
@@ -98,8 +104,10 @@ void Control_Step(void)
     g_speed_left_f  = 0.60f * g_speed_left_f  + 0.40f * g_speed_left;
     g_speed_right_f = 0.60f * g_speed_right_f + 0.40f * g_speed_right;
 
+    BSP_Stage(BSP_STAGE_IMU);
     Imu_Update(CONTROL_DT);
 
+    BSP_Stage(BSP_STAGE_PATH);
     in.distance_mm = g_distance_mm;
     in.yaw_deg = Imu_GetYaw();
     in.gyro_z_dps = Imu_GetGyroZ();
@@ -109,6 +117,7 @@ void Control_Step(void)
 
     Path_Update(&in, &out);
 
+    BSP_Stage(BSP_STAGE_OUTPUT);
     if (out.event != PATH_EVENT_NONE)
     {
         UI_Announce(out.event);

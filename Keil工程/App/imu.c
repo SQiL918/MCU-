@@ -67,6 +67,7 @@ void Imu_Init(void)
 
     for (try = 0; try < 5; try++)
     {
+        BSP_WdgFeed();                /* expected long wait, keep the IWDG happy */
         g_imu_id = MPU6050_GetID();
         if (g_imu_id == 0x00 || g_imu_id == 0xFF)
         {
@@ -126,6 +127,10 @@ void Imu_Calibrate(void)
         sum += raw;
         if (raw < raw_min) { raw_min = raw; }
         if (raw > raw_max) { raw_max = raw; }
+        if ((i & 0x0Fu) == 0u)
+        {
+            BSP_WdgFeed();            /* 2 s calibration window */
+        }
         Delay_ms(5);
     }
 
